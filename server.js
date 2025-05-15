@@ -224,7 +224,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Avvio dell'applicazione
 luluServer.start().catch(error => {
-  logger.error('Errore critico durante l'avvio: ', error);
+  logger.error('Errore critico durante l\'avvio: ', error);
   process.exit(1);
 });
 
