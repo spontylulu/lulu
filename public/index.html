@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lulu - Assistente AI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #3498db;
+            --secondary-color: #2980b9;
+            --dark-color: #34495e;
+            --light-color: #ecf0f1;
+            --success-color: #2ecc71;
+            --warning-color: #f39c12;
+            --danger-color: #e74c3c;
+            --text-color: #333;
+            --border-radius: 8px;
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: #f5f7fa;
+            display: flex;
+            height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            display: flex;
+            height: 100%;
+        }
+
+        /* Chat Area */
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: white;
+            border-radius: var(--border-radius);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin: 20px;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-header h2 {
+            font-size: 1.2rem;
+            font-weight: 500;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 75%;
+            padding: 12px 15px;
+            border-radius: 18px;
+            position: relative;
+            word-wrap: break-word;
+        }
+
+        .message-user {
+            align-self: flex-end;
+            background-color: var(--primary-color);
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+
+        .message-assistant {
+            align-self: flex-start;
+            background-color: #f1f0f0;
+            border-bottom-left-radius: 5px;
+        }
+
+        .message-typing {
+            align-self: flex-start;
+            background-color: #f1f0f0;
+            border-bottom-left-radius: 5px;
+            display: flex;
+            padding: 15px 20px;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #888;
+            border-radius: 50%;
+            margin: 0 3px;
+            display: inline-block;
+            animation: typing 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(1) { animation-delay: 0s; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-5px); }
+        }
+
+        .message pre {
+            background-color: rgba(0, 0, 0, 0.05);
+            padding: 8px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', Courier, monospace;
+            margin: 8px 0;
+        }
+
+        .message code {
+            background-color: rgba(0, 0, 0, 0.05);
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        .chat-input {
+            padding: 15px;
+            border-top: 1px solid #e1e1e1;
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input textarea {
+            flex: 1;
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            border-radius: var(--border-radius);
+            resize: none;
+            outline: none;
+            transition: var(--transition);
+            font-family: inherit;
+        }
+
+        .chat-input textarea:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+
+        .chat-input button {
+            padding: 0 20px;
+            border: none;
+            background-color: var(--primary-color);
+            color: white;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chat-input button:hover {
+            background-color: var(--secondary-color);
+        }
+
+        .chat-input button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* Debug Console */
+        .debug-console {
+            width: 300px;
+            background-color: var(--dark-color);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            margin: 20px 20px 20px 0;
+            border-radius: var(--border-radius);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .debug-header {
+            background-color: rgba(0, 0, 0, 0.2);
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .debug-header h3 {
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .debug-header button {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 0.9rem;
+            opacity: 0.8;
+            transition: var(--transition);
+        }
+
+        .debug-header button:hover {
+            opacity: 1;
+        }
+
+        .debug-content {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .debug-log {
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            word-wrap: break-word;
+        }
+
+        .log-info {
+            color: var(--light-color);
+        }
+
+        .log-success {
+            color: var(--success-color);
+        }
+
+        .log-warning {
+            color: var(--warning-color);
+        }
+
+        .log-error {
+            color: var(--danger-color);
+        }
+
+        .timestamp {
+            opacity: 0.6;
+            font-size: 0.8rem;
+            margin-right: 5px;
+        }
+
+        .expandable {
+            cursor: pointer;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        /* Responsiveness */
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+            
+            .debug-console {
+                width: auto;
+                margin: 0 20px 20px 20px;
+                max-height: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Chat Container -->
+        <div class="chat-container">
+            <div class="chat-header">
+                <h2>Lulu - Assistente AI</h2>
+                <div>
+                    <span id="connection-status" title="Stato connessione">•</span>
+                </div>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+                <!-- I messaggi verranno aggiunti dinamicamente qui -->
+                <div class="message message-assistant">
+                    Ciao! Sono Lulu, il tuo assistente AI personale. Come posso aiutarti oggi?
+                </div>
+            </div>
+            <div class="chat-input">
+                <textarea id="message-input" placeholder="Scrivi un messaggio..." rows="1"></textarea>
+                <button id="send-button" title="Invia">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Debug Console -->
+        <div class="debug-console">
+            <div class="debug-header">
+                <h3>Console Debug</h3>
+                <button id="clear-console" title="Pulisci console">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+            </div>
+            <div class="debug-content" id="debug-console">
+                <!-- I log di debug verranno aggiunti dinamicamente qui -->
+                <div class="debug-log log-info">
+                    <span class="timestamp">10:15:32</span>
+                    Interfaccia web inizializzata
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
