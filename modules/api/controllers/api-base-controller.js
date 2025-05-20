@@ -1,53 +1,79 @@
 /**
- * api-rate-limiter.js
- * Limitatore di richieste API per Lulu
+ * api-base-controller.js
+ * Controller base per endpoint pubblici e autenticazione
  */
 
-const logger = require('../../utils/logger').getLogger('api:rate-limiter');
-const { ApiError } = require('./api-error-handler');
+const express = require('express');
+const logger = require('../../../utils/logger').getLogger('api:controller:base');
+const auth = require('../api-auth.js');  // ✅ path corretto
+const { errors, ApiError } = require('../api-error-handler.js');  // ✅
+const os = require('os');
 
-const rateLimiter = {
-  _requests: new Map(),
-  _config: {
-    defaultLimit: 60,
-    defaultWindow: 60000,
-    headerEnabled: true,
-    ipWhitelist: ['127.0.0.1']
+const baseController = {
+  router: express.Router(),
+
+  initialize() {
+    this._setupRoutes();
+    logger.info('Controller base inizializzato');
   },
 
-  middleware() {
-    return (req, res, next) => {
-      const ip = req.ip || req.connection.remoteAddress;
-      const key = `${ip}:${req.path}`;
+  _setupRoutes() {
+    const r = this.router;
+    r.get('/', this.getApiInfo);
+    r.get('/health', this.getHealth);
+    r.get('/status', this.getStatus);
+    r.post('/auth/login', this.login);
+    r.post('/auth/logout', auth.authenticate, this.logout);
+    r.post('/auth/refresh', this.refreshToken);
+  },
 
-      if (this._config.ipWhitelist.includes(ip)) return next();
+  getApiInfo(req, res) {
+    res.json({
+      name: 'Lulu API',
+      version: process.env.npm_package_version || '1.0.0',
+      message: 'Benvenuto nell’API di Lulu'
+    });
+  },
 
-      const now = Date.now();
-      const limit = req.rateLimit?.limit || this._config.defaultLimit;
-      const window = req.rateLimit?.window || this._config.defaultWindow;
+  getHealth(req, res) {
+    res.json({ status: 'ok', timestamp: Date.now() });
+  },
 
-      if (!this._requests.has(key)) {
-        this._requests.set(key, []);
-      }
+  getStatus(req, res) {
+    res.json({
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      platform: os.platform(),
+      arch: os.arch()
+    });
+  },
 
-      const timestamps = this._requests.get(key).filter(ts => now - ts < window);
-      timestamps.push(now);
-      this._requests.set(key, timestamps);
+  login(req, res) {
+    const { username = 'demo', id = 'user-demo' } = req.body || {};
+    const tokenData = auth.generateTokens({ id, username });
+    res.json(tokenData);
+  },
 
-      if (timestamps.length > limit) {
-        logger.warn(`Rate limit superato da ${ip} su ${req.path}`);
-        return next(new ApiError('Troppe richieste, riprova più tardi', 429));
-      }
+  logout(req, res) {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (token) auth.invalidateToken(token);
+    res.json({ message: 'Logout effettuato con successo' });
+  },
 
-      if (this._config.headerEnabled) {
-        res.setHeader('X-RateLimit-Limit', limit);
-        res.setHeader('X-RateLimit-Remaining', Math.max(0, limit - timestamps.length));
-        res.setHeader('X-RateLimit-Reset', window);
-      }
-
-      next();
-    };
+  refreshToken(req, res) {
+    const { refreshToken } = req.body || {};
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token mancante' });
+    }
+    try {
+      const newTokens = auth.refreshToken(refreshToken);
+      res.json(newTokens);
+    } catch (error) {
+      logger.error('Errore nel refresh token:', error);
+      res.status(401).json({ error: 'Token non valido o scaduto' });
+    }
   }
 };
 
-module.exports = rateLimiter;
+baseController.initialize();
+module.exports = baseController;

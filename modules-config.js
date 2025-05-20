@@ -64,4 +64,28 @@ module.exports = {
       cacheIndicator: true
     }
   }
+  ai: {
+    enabled: true,
+    defaultProvider: "mistral", // oppure "claude"
+    defaultModel: "phi3",
+    services: {
+      mistral: {
+        enabled: true,
+        host: "http://192.168.0.174", // <--- IP del Rog
+        defaultModel: "phi3"
+      },
+      claude: {
+        enabled: true
+      }
+    },
+    router: {
+      enabled: true
+    },
+    caching: {
+      enabled: true,
+      similarity: true,
+      similarityThreshold: 0.8
+    }
+  }
 };
+

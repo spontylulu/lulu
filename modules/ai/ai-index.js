@@ -1,6 +1,6 @@
 /**
  * ai-index.js
- * Punto di ingresso del modulo AI di Lulu
+ * Modulo AI centrale per Lulu: Mistral (locale), Claude (cloud), Cache, Routing
  */
 
 const logger = require('../../utils/logger').getLogger('ai:index');
@@ -8,20 +8,25 @@ const claude = require('./ai-claude-service');
 const prompt = require('./ai-prompt-service');
 const conversation = require('./ai-conversation-service');
 const router = require('./ai-router-service');
+const axios = require('axios');
 
 const aiModule = {
   _active: false,
+  _cache: null,
   _config: {
-    enabled: true,
-    defaultProvider: 'claude',
-    defaultModel: 'claude-3-7-sonnet-20250219',
+    defaultProvider: 'mistral',
+    defaultModel: 'phi3',
     temperature: 0.7,
     maxTokens: 1024,
     systemPrompt: 'Sei Lulu, un assistente AI personale.',
     router: { enabled: true },
     services: {
       claude: { enabled: true },
-      openai: { enabled: false }
+      mistral: {
+        enabled: true,
+        host: 'http://localhost:11434',
+        defaultModel: 'phi3'
+      }
     },
     caching: {
       enabled: true,
@@ -29,7 +34,6 @@ const aiModule = {
       similarityThreshold: 0.8
     }
   },
-  _cache: null,
 
   async initialize(config = {}, cacheModule = null) {
     this._config = { ...this._config, ...config };
@@ -56,25 +60,11 @@ const aiModule = {
     logger.info('Modulo AI chiuso');
   },
 
-  // ────────────────────────────────────────────────
-  // Chat
-  // ────────────────────────────────────────────────
-
   async chat(message, options = {}) {
     if (!this._active) throw new Error('Modulo AI non attivo');
 
-    const settings = {
-      conversationId: options.conversationId,
-      provider: options.provider || this._config.defaultProvider,
-      model: options.model || this._config.defaultModel,
-      temperature: options.temperature ?? this._config.temperature,
-      maxTokens: options.maxTokens || this._config.maxTokens,
-      systemPrompt: options.systemPrompt || this._config.systemPrompt,
-      useCache: options.useCache ?? this._config.caching.enabled,
-      userId: options.userId || 'anonymous'
-    };
+    const settings = this._buildSettings(message, options);
 
-    // Cache?
     const cacheKey = this._generateCacheKey(message, settings);
     if (settings.useCache && this._cache) {
       const cached = await this._cache.get(message, { key: cacheKey });
@@ -89,7 +79,6 @@ const aiModule = {
       }
     }
 
-    // Prompt + history
     const promptData = await prompt.preparePrompt(message, {
       systemPrompt: settings.systemPrompt,
       conversationId: settings.conversationId,
@@ -103,50 +92,33 @@ const aiModule = {
 
     await conversation.addMessage(conv.id, { role: 'user', content: message });
 
-    // Routing
-    let provider = settings.provider;
-    if (this._config.router.enabled) {
-      provider = await router.determineProvider(message, settings);
-    }
+    const provider = await this._selectProvider(message, settings);
+    let response;
 
     if (provider === 'claude') {
-      const result = await claude.chat(promptData.prompt, {
-        model: settings.model,
-        temperature: settings.temperature,
-        maxTokens: settings.maxTokens,
-        systemPrompt: settings.systemPrompt
-      });
-
-      await conversation.addMessage(conv.id, { role: 'assistant', content: result.content });
-
-      if (settings.useCache && this._cache) {
-        await this._cache.set(message, result, { key: cacheKey });
-      }
-
-      return {
-        ...result,
-        conversationId: conv.id
-      };
+      response = await claude.chat(promptData.prompt, settings);
+    } else if (provider === 'mistral') {
+      response = await this._callMistralViaHttp(promptData.prompt, settings);
+    } else {
+      throw new Error(`Provider non supportato: ${provider}`);
     }
 
-    throw new Error(`Provider "${provider}" non supportato`);
-  },
+    await conversation.addMessage(conv.id, { role: 'assistant', content: response.content });
 
-  // ────────────────────────────────────────────────
-  // Completamento semplice
-  // ────────────────────────────────────────────────
+    if (settings.useCache && this._cache) {
+      await this._cache.set(message, response, { key: cacheKey });
+    }
+
+    return {
+      ...response,
+      conversationId: conv.id
+    };
+  },
 
   async complete(promptText, options = {}) {
     if (!this._active) throw new Error('Modulo AI non attivo');
 
-    const settings = {
-      provider: options.provider || this._config.defaultProvider,
-      model: options.model || this._config.defaultModel,
-      temperature: options.temperature ?? this._config.temperature,
-      maxTokens: options.maxTokens || this._config.maxTokens,
-      useCache: options.useCache ?? this._config.caching.enabled,
-      userId: options.userId || 'anonymous'
-    };
+    const settings = this._buildSettings(promptText, options);
 
     const cacheKey = this._generateCacheKey(promptText, settings);
     if (settings.useCache && this._cache) {
@@ -160,29 +132,77 @@ const aiModule = {
       }
     }
 
-    if (settings.provider === 'claude') {
-      const result = await claude.complete(promptText, {
-        model: settings.model,
-        temperature: settings.temperature,
-        maxTokens: settings.maxTokens
-      });
+    const provider = await this._selectProvider(promptText, settings);
+    let response;
 
-      if (settings.useCache && this._cache) {
-        await this._cache.set(promptText, result, { key: cacheKey });
-      }
-
-      return {
-        completion: result.content,
-        model: result.model || settings.model
-      };
+    if (provider === 'claude') {
+      response = await claude.complete(promptText, settings);
+    } else if (provider === 'mistral') {
+      response = await this._callMistralViaHttp([{ role: 'user', content: promptText }], settings);
+    } else {
+      throw new Error(`Provider non supportato: ${provider}`);
     }
 
-    throw new Error(`Provider "${settings.provider}" non supportato`);
+    if (settings.useCache && this._cache) {
+      await this._cache.set(promptText, response, { key: cacheKey });
+    }
+
+    return {
+      completion: response.content,
+      model: response.model
+    };
   },
 
-  // ────────────────────────────────────────────────
-  // Altri metodi
-  // ────────────────────────────────────────────────
+  async _callMistralViaHttp(messages, options) {
+    const host = this._config.services.mistral.host;
+    const model = options.model || this._config.services.mistral.defaultModel;
+    const temperature = options.temperature ?? 0.7;
+    const maxTokens = options.maxTokens ?? 1024;
+
+    try {
+      const response = await axios.post(`${host}/api/chat`, {
+        model,
+        messages,
+        temperature,
+        max_tokens: maxTokens
+      });
+
+      const content = response.data.message?.content || response.data.response || '[no content]';
+
+      return {
+        content,
+        model,
+        usage: response.data.usage || { total_tokens: 0 }
+      };
+    } catch (err) {
+      logger.error('Errore nella chiamata HTTP a Mistral:', err.message);
+      throw err;
+    }
+  },
+
+  _generateCacheKey(input, options = {}) {
+    const base = `${input}|${options.userId || ''}|${options.model || ''}`;
+    const hash = require('crypto').createHash('md5').update(base).digest('hex');
+    return `ai:${hash}`;
+  },
+
+  _buildSettings(input, options = {}) {
+    return {
+      conversationId: options.conversationId,
+      provider: options.provider || this._config.defaultProvider,
+      model: options.model || this._config.defaultModel,
+      temperature: options.temperature ?? this._config.temperature,
+      maxTokens: options.maxTokens || this._config.maxTokens,
+      systemPrompt: options.systemPrompt || this._config.systemPrompt,
+      useCache: options.useCache ?? this._config.caching.enabled,
+      userId: options.userId || 'anonymous'
+    };
+  },
+
+  async _selectProvider(input, settings) {
+    if (!this._config.router.enabled) return settings.provider;
+    return await router.determineProvider(input, settings);
+  },
 
   async getAvailableModels() {
     const models = [];
@@ -197,16 +217,10 @@ const aiModule = {
       active: this._active,
       defaultModel: this._config.defaultModel,
       defaultProvider: this._config.defaultProvider,
-      providers: {
+      services: {
         claude: await claude.getStatus()
       }
     };
-  },
-
-  _generateCacheKey(text, options = {}) {
-    const base = `${text}|${options.userId || ''}|${options.model || ''}`;
-    const hash = require('crypto').createHash('md5').update(base).digest('hex');
-    return `ai:${hash}`;
   }
 };
 
