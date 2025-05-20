@@ -10,37 +10,37 @@ const fs = require('fs');
  */
 async function loadModules() {
   const loadedModules = {};
-  
+
   // Itera sui moduli disponibili
   for (const [moduleName, moduleConfig] of Object.entries(modulesConfig)) {
     if (!moduleConfig) {
       logger.info(`Modulo ${moduleName} disattivato, skip.`);
       continue;
     }
-    
+
     try {
       // Determina se il modulo è abilitato
-      const isEnabled = moduleConfig === true || 
+      const isEnabled = moduleConfig === true ||
         (typeof moduleConfig === 'object' && moduleConfig.enabled !== false);
-      
+
       if (!isEnabled) {
         logger.info(`Modulo ${moduleName} disattivato, skip.`);
         continue;
       }
-      
+
       // Tenta di caricare il modulo
       logger.info(`Caricamento modulo: ${moduleName}`);
       const modulePath = path.join(__dirname, 'modules', moduleName, `${moduleName}-index.js`);
-      
+
       // Verifica che il file esista
       if (!fs.existsSync(modulePath)) {
         logger.warn(`Modulo ${moduleName} non trovato in: ${modulePath}`);
         continue;
       }
-      
+
       // Richiede il modulo e lo inizializza
       const moduleInstance = require(modulePath);
-      
+
       // Passa la configurazione specifica al modulo se disponibile
       if (typeof moduleConfig === 'object') {
         logger.debug(`Inizializzazione ${moduleName} con configurazione personalizzata`);
@@ -49,14 +49,14 @@ async function loadModules() {
         logger.debug(`Inizializzazione ${moduleName} con configurazione predefinita`);
         await moduleInstance.initialize();
       }
-      
+
       // Salva il riferimento al modulo caricato
       loadedModules[moduleName] = moduleInstance;
       logger.info(`Modulo ${moduleName} caricato con successo`);
-      
+
     } catch (error) {
       logger.error(`Errore nel caricamento del modulo ${moduleName}:`, error);
-      
+
       // Se è un modulo fondamentale, propaga l'errore
       if (moduleName === 'core' || moduleName === 'api') {
         throw new Error(`Errore critico nel caricamento del modulo ${moduleName}: ${error.message}`);
@@ -64,7 +64,7 @@ async function loadModules() {
       // Altrimenti continua con gli altri moduli
     }
   }
-  
+
   return loadedModules;
 }
 
@@ -75,11 +75,11 @@ async function loadModules() {
  */
 function isModuleEnabled(moduleName) {
   const config = modulesConfig[moduleName];
-  
+
   if (!config) {
     return false;
   }
-  
+
   return config === true || (typeof config === 'object' && config.enabled !== false);
 }
 
@@ -92,7 +92,7 @@ function getModuleConfig(moduleName) {
   return modulesConfig[moduleName] || false;
 }
 
-module.exports = { 
+module.exports = {
   loadModules,
   isModuleEnabled,
   getModuleConfig

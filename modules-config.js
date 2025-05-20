@@ -1,75 +1,67 @@
 /**
  * modules-config.js
- * File di configurazione centrale per i moduli di Lulu
- * 
- * Definisce quali moduli sono attivi e le loro impostazioni specifiche.
- * Questo file viene utilizzato dal loader per caricare dinamicamente i moduli.
+ * Configurazione centrale dei moduli per Lulu
+ * Definisce quali moduli sono attivi, le configurazioni specifiche, e le opzioni globali.
  */
 
-/**
- * Configurazione dei moduli per Lulu
- * true = modulo attivato
- * false = modulo disattivato
- * object = modulo attivato con configurazioni specifiche
- */
 module.exports = {
-  // Moduli core (sempre attivi)
-  core: true,         // Funzionalità di base e gestione applicazione
-  api: true,          // Interfaccia API RESTful
+  // === MODULI CORE ===
+  core: true,         // Gestione eventi, configurazioni e metriche
+  api: true,          // API REST per comunicazione esterna
 
-  // Moduli funzionali
-  cache: true,        // Sistema di cache
-  voice: false,       // Sintesi vocale (disattivato di default)
+  // === MODULI FUNZIONALI ===
+  cache: true,        // Cache intelligente per risposte AI
+  voice: false,       // Sintesi vocale (attualmente disattivata)
 
-  // Configurazione avanzata di moduli AI
+  // === MODULO AI ===
   ai: {
-    enabled: true,    // Modulo AI attivo
+    enabled: true,
     services: {
-      claude: true,   // Servizio Claude attivato
-      openai: false,  // Servizio OpenAI disattivato
+      claude: true,     // Claude by Anthropic attivo
+      openai: false     // OpenAI disattivato per ora
     },
-    defaultModel: 'claude-3-7-sonnet-20250219', // Modello predefinito aggiornato
-    temperature: 0.7, // Temperatura predefinita
+    defaultModel: 'claude-3-7-sonnet-20250219',
+    temperature: 0.7,
     systemPrompt: "Sei Lulu, un assistente AI personale. Rispondi in modo conversazionale, conciso e utile."
   },
 
-  // Moduli di integrazione
-  inventory: true,    // Gestione inventario (per rappresentante)
-  screen: false,      // Riconoscimento schermo (ispirato a PokeView)
+  // === INTEGRAZIONI ===
+  inventory: true,    // Gestione inventario, schede tecniche, prodotti
+  screen: false,      // OCR e lettura da schermo Android (PokeView-style)
 
-  // Utility
+  // === LOGGING ===
   logging: {
     enabled: true,
-    level: 'info',    // error, warn, info, debug
+    level: 'info',     // Livelli: error, warn, info, debug
     detailed: true,
     fileName: 'lulu.log',
-    maxSize: '10m',   // Dimensione massima dei file di log
-    maxFiles: 5       // Numero massimo di file di log 
+    maxSize: '10m',
+    maxFiles: 5
   },
 
-  // Cache avanzata
+  // === CONFIGURAZIONE CACHE AVANZATA ===
   cacheConfig: {
     enabled: true,
     similarity: {
       enabled: true,
-      threshold: 0.8  // Soglia di similarità per cache
+      threshold: 0.8
     },
     compression: {
       enabled: true,
-      minLength: 500  // Lunghezza minima per compressione
+      minLength: 500
     },
-    ttl: 30 * 24 * 60 * 60 * 1000, // Time-to-live (30 giorni)
-    cleanupInterval: 24 * 60 * 60 * 1000 // Pulizia ogni 24 ore
+    ttl: 30 * 24 * 60 * 60 * 1000,           // 30 giorni in millisecondi
+    cleanupInterval: 24 * 60 * 60 * 1000     // Pulizia giornaliera
   },
 
-  // Configurazione interfaccia
+  // === INTERFACCIA UTENTE ===
   ui: {
     enabled: true,
     theme: 'default',
     features: {
-      voiceInput: false,  // Input vocale disattivato di default
-      darkMode: true,     // Tema scuro attivo
-      cacheIndicator: true // Mostra indicatore stato cache
+      voiceInput: false,
+      darkMode: true,
+      cacheIndicator: true
     }
   }
 };
