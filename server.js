@@ -10,8 +10,8 @@ const path = require('path');
 const { loadModules } = require('./loader');
 const logger = require('./utils/logger').getLogger('core:server');
 
+// Configurazione ambiente
 dotenv.config();
-
 const PORT = process.env.PORT || 3000;
 const ENV = process.env.NODE_ENV || 'development';
 const IS_PROD = ENV === 'production';
@@ -58,7 +58,45 @@ class LuluServer {
   }
 
   setupRoutes() {
+    // =============================
+    // API: inoltro richieste AI
+    // =============================
+    this.app.post('/ask', async (req, res) => {
+      const prompt = req.body.prompt;
+
+      if (!prompt || typeof prompt !== 'string') {
+        logger.warn('Prompt mancante o invalido:', prompt);
+        return res.status(400).json({ error: 'Prompt mancante o non valido' });
+      }
+
+      logger.info(`Prompt ricevuto: "${prompt}"`);
+
+      try {
+        const aiService = require('./modules/ai/ai-conversation-service');
+        const risposta = await aiService.rispondi(prompt);
+
+        if (!risposta || typeof risposta !== 'string' || risposta.trim() === '') {
+          logger.warn('Risposta AI vuota o nulla.');
+          return res.json({ risposta: '[vuoto]' });
+        }
+
+        logger.debug(`Risposta AI: ${risposta}`);
+        res.json({ risposta });
+
+      } catch (err) {
+        logger.error('Errore nel modulo AI:', err);
+        res.status(500).json({ error: 'Errore durante la risposta AI' });
+      }
+    });
+
+    // =============================
+    // API: router moduli generici
+    // =============================
     this.app.use('/api', this.modules.api.router);
+
+    // =============================
+    // API: status sistema
+    // =============================
     this.app.get('/status', (req, res) => {
       const status = {
         uptime: process.uptime(),
@@ -70,6 +108,10 @@ class LuluServer {
       };
       res.json(status);
     });
+
+    // =============================
+    // UI: fallback su interfaccia
+    // =============================
     this.app.get('*', (req, res) => {
       res.sendFile(path.join(__dirname, 'public', 'index.html'));
     });
@@ -103,51 +145,21 @@ class LuluServer {
     }
     return new Promise(resolve => {
       this.server.close(() => {
-        logger.info('Server HTTP chiuso');
+        logger.info('Server chiuso');
         resolve();
       });
     });
   }
-
-  async start() {
-    try {
-      this.setupMiddleware();
-      const ok = await this.loadAllModules();
-      if (!ok) throw new Error('Modulo non caricato');
-      this.setupRoutes();
-      await this.startServer();
-      logger.info('Lulu avviato con successo');
-    } catch (err) {
-      logger.error('Errore avvio Lulu:', err);
-      await this.shutdown();
-      process.exit(1);
-    }
-  }
 }
 
-const luluServer = new LuluServer();
-
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM ricevuto');
-  await luluServer.shutdown();
-  process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-  logger.info('SIGINT ricevuto');
-  await luluServer.shutdown();
-  process.exit(0);
-});
-
-process.on('uncaughtException', err => {
-  logger.error('Eccezione non catturata:', err);
-  luluServer.shutdown().then(() => process.exit(1));
-});
-
-process.on('unhandledRejection', reason => {
-  logger.error('Promessa non gestita:', reason);
-});
-
-luluServer.start();
-
-module.exports = luluServer;
+(async () => {
+  const lulu = new LuluServer();
+  lulu.setupMiddleware();
+  const success = await lulu.loadAllModules();
+  if (success) {
+    lulu.setupRoutes();
+    await lulu.startServer();
+  } else {
+    logger.error('Avvio server interrotto per errore caricamento moduli');
+  }
+})();

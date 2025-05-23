@@ -15,6 +15,7 @@ const system = require('./controllers/api-system-controller');
 const apiModule = {
   router: express.Router(),
   _active: false,
+  _aiModule: null,  // Riferimento al modulo AI
   _config: {
     basePath: '/api',
     version: 'v1',
@@ -25,9 +26,24 @@ const apiModule = {
     swaggerEnabled: true
   },
 
-  async initialize(config = {}) {
+  async initialize(config = {}, loadedModules = {}) {
     this._config = { ...this._config, ...config };
     this._setupMiddleware();
+
+    // Usa il modulo AI già caricato dal loader invece di crearne uno nuovo
+    if (loadedModules && loadedModules.ai) {
+      this._aiModule = loadedModules.ai;
+      console.log('[API DEBUG] Modulo AI collegato:', typeof loadedModules.ai);
+      console.log('[API DEBUG] AI complete function exists:', typeof loadedModules.ai.complete === 'function');
+    } else {
+      console.log('[API DEBUG] LoadedModules:', loadedModules);
+      console.log('[API DEBUG] AI not found in loadedModules');
+    }
+
+    // Inizializza il controller AI con il modulo corretto
+    console.log('[API DEBUG] Passando AI al controller, presente:', !!this._aiModule);
+    await ai.initialize(this._aiModule);
+
     this._setupRoutes();
     this._active = true;
     logger.info('Modulo API inizializzato');
@@ -42,13 +58,11 @@ const apiModule = {
   status() {
     return {
       active: this._active,
-      config: this._config
+      config: this._config,
+      aiConnected: !!this._aiModule
     };
   },
 
-  // ────────────────────────────────────────────────
-  // Middleware
-  // ────────────────────────────────────────────────
   _setupMiddleware() {
     const router = this.router;
 
@@ -88,34 +102,29 @@ const apiModule = {
     }
   },
 
-  // ────────────────────────────────────────────────
-  // Routes
-  // ────────────────────────────────────────────────
   _setupRoutes() {
     const r = this.router;
     const v = `/${this._config.version}`;
 
-    // Info base
     r.get('/', base.getApiInfo);
     r.get('/health', base.getHealth);
     r.get('/status', base.getStatus);
 
-    // System
     r.get(`${v}/system/info`, system.getSystemInfo);
     r.get(`${v}/system/metrics`, system.getMetrics);
     r.get(`${v}/system/logs`, system.getLogs);
 
-    // AI
-    r.post(`${v}/ai/chat`, ai.chat);
-    r.post(`${v}/ai/complete`, ai.complete);
-    r.get(`${v}/ai/models`, ai.getModels);
+    // *** RIMOSSE LE ROUTE AI DA QUI ***
+    // Le route AI sono ora configurate direttamente nel controller AI
+    // usando il closure pattern per mantenere il riferimento al modulo AI
+    
+    // Monta il router del controller AI
+    r.use(`${v}/ai`, ai.router);
 
-    // Auth
     r.post(`${v}/auth/login`, base.login);
     r.post(`${v}/auth/logout`, auth.authenticate, base.logout);
     r.post(`${v}/auth/refresh`, base.refreshToken);
 
-    // 404
     r.use((req, res) => {
       logger.debug(`404: ${req.originalUrl}`);
       res.status(404).json({ error: 'Endpoint non trovato', path: req.originalUrl });

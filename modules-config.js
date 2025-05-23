@@ -1,81 +1,32 @@
 /**
  * modules-config.js
- * Configurazione centrale dei moduli per Lulu
- * Definisce quali moduli sono attivi, le configurazioni specifiche, e le opzioni globali.
+ * Configurazione completa dei moduli Lulu + AI Ollama (Llama3.1:8B) + Claude fallback
+ * IMPORTANTE: L'ordine dei moduli determina l'ordine di caricamento!
  */
 
 module.exports = {
-  // === MODULI CORE ===
-  core: true,         // Gestione eventi, configurazioni e metriche
-  api: true,          // API REST per comunicazione esterna
+  // ─────────────────────────────
+  // Moduli principali (in ordine di dipendenza)
+  core: true,
+  cache: true,
 
-  // === MODULI FUNZIONALI ===
-  cache: true,        // Cache intelligente per risposte AI
-  voice: false,       // Sintesi vocale (attualmente disattivata)
-
-  // === MODULO AI ===
+  // ─────────────────────────────
+  // AI: Ollama (Llama3.1:8B) primario + Claude (cloud) fallback
+  // DEVE essere caricato PRIMA del modulo API!
   ai: {
     enabled: true,
+    defaultProvider: "ollama",
+    defaultModel: "llama3.1:8b",
     services: {
-      claude: true,     // Claude by Anthropic attivo
-      openai: false     // OpenAI disattivato per ora
-    },
-    defaultModel: 'claude-3-7-sonnet-20250219',
-    temperature: 0.7,
-    systemPrompt: "Sei Lulu, un assistente AI personale. Rispondi in modo conversazionale, conciso e utile."
-  },
-
-  // === INTEGRAZIONI ===
-  inventory: true,    // Gestione inventario, schede tecniche, prodotti
-  screen: false,      // OCR e lettura da schermo Android (PokeView-style)
-
-  // === LOGGING ===
-  logging: {
-    enabled: true,
-    level: 'info',     // Livelli: error, warn, info, debug
-    detailed: true,
-    fileName: 'lulu.log',
-    maxSize: '10m',
-    maxFiles: 5
-  },
-
-  // === CONFIGURAZIONE CACHE AVANZATA ===
-  cacheConfig: {
-    enabled: true,
-    similarity: {
-      enabled: true,
-      threshold: 0.8
-    },
-    compression: {
-      enabled: true,
-      minLength: 500
-    },
-    ttl: 30 * 24 * 60 * 60 * 1000,           // 30 giorni in millisecondi
-    cleanupInterval: 24 * 60 * 60 * 1000     // Pulizia giornaliera
-  },
-
-  // === INTERFACCIA UTENTE ===
-  ui: {
-    enabled: true,
-    theme: 'default',
-    features: {
-      voiceInput: false,
-      darkMode: true,
-      cacheIndicator: true
-    }
-  }
-  ai: {
-    enabled: true,
-    defaultProvider: "mistral", // oppure "claude"
-    defaultModel: "phi3",
-    services: {
-      mistral: {
+      ollama: {
         enabled: true,
-        host: "http://192.168.0.174", // <--- IP del Rog
-        defaultModel: "phi3"
+        host: "http://192.168.0.174:11434", // Ollama sul Rog - porta standard
+        defaultModel: "llama3.1:8b"
       },
       claude: {
-        enabled: true
+        enabled: false, // Rimane disabilitato come fallback (si abilita solo se serve)
+        apiKey: process.env.CLAUDE_API_KEY,
+        defaultModel: "claude-3-opus-20240229"
       }
     },
     router: {
@@ -86,6 +37,24 @@ module.exports = {
       similarity: true,
       similarityThreshold: 0.8
     }
-  }
-};
+  },
 
+  // ─────────────────────────────
+  // API: Deve essere caricato DOPO il modulo AI
+  api: {
+    enabled: true,
+    basePath: '/api',
+    version: 'v1',
+    enableRateLimit: false,
+    enableCors: true,
+    enableCache: true,
+    authRequired: false,
+    swaggerEnabled: false
+  },
+
+  // ─────────────────────────────
+  // Moduli futuri
+  vocale: false,
+  screen: false,
+  inventory: false
+};

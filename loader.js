@@ -38,23 +38,58 @@ async function loadModules() {
         continue;
       }
 
-      // Richiede il modulo e lo inizializza
+      // Richiede il modulo
       const moduleInstance = require(modulePath);
-
-      // Passa la configurazione specifica al modulo se disponibile
-      if (typeof moduleConfig === 'object') {
-        logger.debug(`Inizializzazione ${moduleName} con configurazione personalizzata`);
-        await moduleInstance.initialize(moduleConfig);
+      
+      // Inizializza il modulo UNA SOLA VOLTA con la configurazione appropriata
+      if (typeof moduleInstance.initialize === 'function') {
+        logger.debug(`Inizializzazione ${moduleName} con configurazione`);
+        
+        // Passa la configurazione specifica se è un oggetto, altrimenti configurazione vuota
+        const configToPass = typeof moduleConfig === 'object' ? moduleConfig : {};
+        
+        // Gestione speciale per moduli che hanno dipendenze
+        logger.info(`Inizializzando modulo ${moduleName}, loadedModules keys:`, Object.keys(loadedModules));
+        
+        if (moduleName === 'ai' && loadedModules.cache) {
+          // Modulo AI: passa il modulo cache
+          logger.info('Inizializzando AI con cache module');
+          const result = await moduleInstance.initialize(configToPass, loadedModules.cache);
+          loadedModules[moduleName] = result || moduleInstance;
+        } else if (moduleName === 'api') {
+          // Modulo API: passa tutti i moduli caricati
+          logger.info('Inizializzando API con tutti i moduli:', Object.keys(loadedModules));
+          console.log('=== LOADER DEBUG API ===');
+          console.log('Tentativo di inizializzazione API...');
+          try {
+            const result = await moduleInstance.initialize(configToPass, loadedModules);
+            console.log('✅ API inizializzato con successo');
+            loadedModules[moduleName] = result || moduleInstance;
+          } catch (apiError) {
+            console.log('❌ ERRORE SPECIFICO API:', apiError);
+            console.log('Stack trace completo:', apiError.stack);
+            throw apiError; // Ripropaga l'errore
+          }
+        } else {
+          logger.info(`Inizializzando ${moduleName} con configurazione standard`);
+          const result = await moduleInstance.initialize(configToPass);
+          loadedModules[moduleName] = result || moduleInstance;
+        }
       } else {
-        logger.debug(`Inizializzazione ${moduleName} con configurazione predefinita`);
-        await moduleInstance.initialize();
+        // Se non ha il metodo initialize, salva direttamente l'istanza
+        loadedModules[moduleName] = moduleInstance;
       }
 
-      // Salva il riferimento al modulo caricato
-      loadedModules[moduleName] = moduleInstance;
       logger.info(`Modulo ${moduleName} caricato con successo`);
 
     } catch (error) {
+      console.log('=== ERRORE DETTAGLIATO LOADER ===');
+      console.log('Modulo fallito:', moduleName);
+      console.log('Tipo errore:', typeof error);
+      console.log('Messaggio errore:', error.message);
+      console.log('Stack completo:', error.stack);
+      console.log('Error object:', error);
+      
       logger.error(`Errore nel caricamento del modulo ${moduleName}:`, error);
 
       // Se è un modulo fondamentale, propaga l'errore

@@ -1,227 +1,279 @@
 /**
  * ai-index.js
- * Modulo AI centrale per Lulu: Mistral (locale), Claude (cloud), Cache, Routing
+ * Modulo AI principale con supporto a Ollama (Llama3.1:8B primario) e Claude (fallback)
  */
 
 const logger = require('../../utils/logger').getLogger('ai:index');
-const claude = require('./ai-claude-service');
+const axios = require('axios');
 const prompt = require('./ai-prompt-service');
 const conversation = require('./ai-conversation-service');
-const router = require('./ai-router-service');
-const axios = require('axios');
 
-const aiModule = {
-  _active: false,
-  _cache: null,
-  _config: {
-    defaultProvider: 'mistral',
-    defaultModel: 'phi3',
+let _config = {};
+let _cache = null;
+let _active = false;
+
+async function initialize(config = {}, cacheModule = null) {
+  console.log('=== AI INITIALIZE DEBUG ===');
+  console.log('Config ricevuto:', config);
+  console.log('Cache module presente:', !!cacheModule);
+  
+  _config = {
+    defaultProvider: 'ollama',
+    defaultModel: 'llama3.1:8b',
     temperature: 0.7,
     maxTokens: 1024,
-    systemPrompt: 'Sei Lulu, un assistente AI personale.',
-    router: { enabled: true },
+    systemPrompt: 'Rispondi sempre e solo in italiano con tono professionale.',
     services: {
-      claude: { enabled: true },
-      mistral: {
+      ollama: {
         enabled: true,
-        host: 'http://localhost:11434',
-        defaultModel: 'phi3'
+        host: 'http://192.168.0.174:11434',
+        defaultModel: 'llama3.1:8b'
+      },
+      claude: {
+        enabled: process.env.CLAUDE_API_KEY != null,
+        apiKey: process.env.CLAUDE_API_KEY,
+        defaultModel: 'claude-3-opus-20240229'
       }
     },
     caching: {
       enabled: true,
       similarity: true,
       similarityThreshold: 0.8
-    }
-  },
+    },
+    ...config
+  };
 
-  async initialize(config = {}, cacheModule = null) {
-    this._config = { ...this._config, ...config };
-    this._cache = cacheModule;
+  console.log('Configurazione finale _config:', _config);
+  console.log('_config.services:', _config.services);
 
-    await claude.initialize(this._config.services.claude);
-    await prompt.initialize({ defaultSystemPrompt: this._config.systemPrompt });
-    await conversation.initialize();
-    await router.initialize(this._config.router);
+  _cache = cacheModule;
+  await prompt.initialize({ defaultSystemPrompt: _config.systemPrompt });
+  await conversation.initialize();
 
-    this._active = true;
-    logger.info('Modulo AI inizializzato');
-    return this;
-  },
+  _active = true;
+  logger.info('Modulo AI inizializzato con Ollama (Llama3.1:8B) primario e Claude fallback');
+  return module.exports;
+}
 
-  async shutdown() {
-    await Promise.all([
-      claude.shutdown(),
-      prompt.shutdown?.(),
-      conversation.shutdown(),
-      router.shutdown()
-    ]);
-    this._active = false;
-    logger.info('Modulo AI chiuso');
-  },
+async function shutdown() {
+  await prompt.shutdown?.();
+  await conversation.shutdown();
+  _active = false;
+  logger.info('Modulo AI chiuso');
+}
 
-  async chat(message, options = {}) {
-    if (!this._active) throw new Error('Modulo AI non attivo');
+function isActive() {
+  return _active;
+}
 
-    const settings = this._buildSettings(message, options);
-
-    const cacheKey = this._generateCacheKey(message, settings);
-    if (settings.useCache && this._cache) {
-      const cached = await this._cache.get(message, { key: cacheKey });
-      if (cached) {
-        return {
-          content: cached.content || cached,
-          conversationId: settings.conversationId,
-          model: settings.model,
-          fromCache: true,
-          usage: cached.usage || { total_tokens: 0 }
-        };
-      }
-    }
-
-    const promptData = await prompt.preparePrompt(message, {
-      systemPrompt: settings.systemPrompt,
-      conversationId: settings.conversationId,
-      userId: settings.userId,
-      getConversation: conversation.getConversation
-    });
-
-    const conv = settings.conversationId
-      ? await conversation.getConversation(settings.conversationId) || await conversation.createConversation(settings.userId)
-      : await conversation.createConversation(settings.userId);
-
-    await conversation.addMessage(conv.id, { role: 'user', content: message });
-
-    const provider = await this._selectProvider(message, settings);
-    let response;
-
-    if (provider === 'claude') {
-      response = await claude.chat(promptData.prompt, settings);
-    } else if (provider === 'mistral') {
-      response = await this._callMistralViaHttp(promptData.prompt, settings);
-    } else {
-      throw new Error(`Provider non supportato: ${provider}`);
-    }
-
-    await conversation.addMessage(conv.id, { role: 'assistant', content: response.content });
-
-    if (settings.useCache && this._cache) {
-      await this._cache.set(message, response, { key: cacheKey });
-    }
-
-    return {
-      ...response,
-      conversationId: conv.id
-    };
-  },
-
-  async complete(promptText, options = {}) {
-    if (!this._active) throw new Error('Modulo AI non attivo');
-
-    const settings = this._buildSettings(promptText, options);
-
-    const cacheKey = this._generateCacheKey(promptText, settings);
-    if (settings.useCache && this._cache) {
-      const cached = await this._cache.get(promptText, { key: cacheKey });
-      if (cached) {
-        return {
-          completion: cached.content || cached,
-          fromCache: true,
-          model: settings.model
-        };
-      }
-    }
-
-    const provider = await this._selectProvider(promptText, settings);
-    let response;
-
-    if (provider === 'claude') {
-      response = await claude.complete(promptText, settings);
-    } else if (provider === 'mistral') {
-      response = await this._callMistralViaHttp([{ role: 'user', content: promptText }], settings);
-    } else {
-      throw new Error(`Provider non supportato: ${provider}`);
-    }
-
-    if (settings.useCache && this._cache) {
-      await this._cache.set(promptText, response, { key: cacheKey });
-    }
-
-    return {
-      completion: response.content,
-      model: response.model
-    };
-  },
-
-  async _callMistralViaHttp(messages, options) {
-    const host = this._config.services.mistral.host;
-    const model = options.model || this._config.services.mistral.defaultModel;
-    const temperature = options.temperature ?? 0.7;
-    const maxTokens = options.maxTokens ?? 1024;
-
-    try {
-      const response = await axios.post(`${host}/api/chat`, {
-        model,
-        messages,
-        temperature,
-        max_tokens: maxTokens
-      });
-
-      const content = response.data.message?.content || response.data.response || '[no content]';
-
-      return {
-        content,
-        model,
-        usage: response.data.usage || { total_tokens: 0 }
-      };
-    } catch (err) {
-      logger.error('Errore nella chiamata HTTP a Mistral:', err.message);
-      throw err;
-    }
-  },
-
-  _generateCacheKey(input, options = {}) {
-    const base = `${input}|${options.userId || ''}|${options.model || ''}`;
-    const hash = require('crypto').createHash('md5').update(base).digest('hex');
-    return `ai:${hash}`;
-  },
-
-  _buildSettings(input, options = {}) {
-    return {
-      conversationId: options.conversationId,
-      provider: options.provider || this._config.defaultProvider,
-      model: options.model || this._config.defaultModel,
-      temperature: options.temperature ?? this._config.temperature,
-      maxTokens: options.maxTokens || this._config.maxTokens,
-      systemPrompt: options.systemPrompt || this._config.systemPrompt,
-      useCache: options.useCache ?? this._config.caching.enabled,
-      userId: options.userId || 'anonymous'
-    };
-  },
-
-  async _selectProvider(input, settings) {
-    if (!this._config.router.enabled) return settings.provider;
-    return await router.determineProvider(input, settings);
-  },
-
-  async getAvailableModels() {
-    const models = [];
-    if (this._config.services.claude.enabled) {
-      models.push(...await claude.getAvailableModels());
-    }
-    return models;
-  },
-
-  async getStatus() {
-    return {
-      active: this._active,
-      defaultModel: this._config.defaultModel,
-      defaultProvider: this._config.defaultProvider,
-      services: {
-        claude: await claude.getStatus()
-      }
-    };
+async function complete(promptText, options = {}) {
+  console.log('=== AI COMPLETE DEBUG ===');
+  console.log('_config presente:', !!_config);
+  console.log('_config keys:', Object.keys(_config));
+  console.log('_config.services presente:', !!_config.services);
+  console.log('_config.services:', _config.services);
+  
+  // Controllo di sicurezza per configurazione
+  if (!_config || !_config.services) {
+    console.log('❌ ERRORE: Configurazione AI non inizializzata!');
+    throw new Error('Modulo AI non inizializzato correttamente - configurazione mancante');
   }
-};
 
-module.exports = aiModule;
+  const settings = buildSettings(promptText, options);
+  const cacheKey = generateCacheKey(promptText, settings);
+
+  // Controlla cache prima di chiamare AI
+  if (settings.useCache && _cache) {
+    const cached = await _cache.get(promptText, { key: cacheKey });
+    if (cached) {
+      logger.debug('Cache hit - risposta trovata in cache');
+      return { completion: cached.content || cached, model: settings.model };
+    }
+  }
+
+  let response;
+  
+  // Prova prima Ollama (Llama3.1:8B)
+  if (_config.services.ollama && _config.services.ollama.enabled) {
+    try {
+      logger.info('Tentativo connessione Ollama (Llama3.1:8B)');
+      response = await callOllama(promptText, settings);
+      logger.info('✅ Risposta ricevuta da Ollama');
+    } catch (err) {
+      logger.warn('❌ Ollama fallito, provo Claude come fallback:', err.message);
+      
+      // Fallback su Claude
+      if (_config.services.claude && _config.services.claude.enabled) {
+        try {
+          logger.info('Tentativo fallback su Claude');
+          response = await callClaude(promptText, settings);
+          logger.info('✅ Risposta ricevuta da Claude (fallback)');
+        } catch (claudeErr) {
+          logger.error('❌ Anche Claude fallito:', claudeErr.message);
+          throw claudeErr;
+        }
+      } else {
+        logger.error('❌ Claude non configurato, nessun fallback disponibile');
+        throw err;
+      }
+    }
+  } else if (_config.services.claude && _config.services.claude.enabled) {
+    // Solo Claude disponibile
+    logger.info('Solo Claude disponibile');
+    response = await callClaude(promptText, settings);
+  } else {
+    throw new Error('Nessun servizio AI disponibile');
+  }
+
+  // Salva in cache se abilitato
+  if (settings.useCache && _cache) {
+    await _cache.set(promptText, response.content, { key: cacheKey });
+    logger.debug('Risposta salvata in cache');
+  }
+
+  return {
+    completion: response.content,
+    model: response.model
+  };
+}
+
+function buildSettings(input, options = {}) {
+  return {
+    model: options.model || _config.defaultModel,
+    temperature: options.temperature ?? _config.temperature,
+    maxTokens: options.maxTokens || _config.maxTokens,
+    systemPrompt: options.systemPrompt || _config.systemPrompt,
+    useCache: options.useCache ?? _config.caching.enabled,
+    userId: options.userId || 'anon'
+  };
+}
+
+function generateCacheKey(text, opts = {}) {
+  const key = `${text}|${opts.model}|${opts.userId}`;
+  const hash = require('crypto').createHash('md5').update(key).digest('hex');
+  return `ai:${hash}`;
+}
+
+async function callOllama(promptText, settings) {
+  const { host, defaultModel } = _config.services.ollama;
+  
+  // Payload per Ollama API
+  const payload = {
+    model: settings.model || defaultModel,
+    prompt: `${settings.systemPrompt}\n\nUtente: ${promptText}\nAssistente:`,
+    stream: false,
+    options: {
+      temperature: settings.temperature,
+      num_predict: settings.maxTokens
+    }
+  };
+
+  logger.debug(`Chiamata Ollama: ${host}/api/generate`);
+  logger.debug(`Modello: ${payload.model}`);
+
+  const res = await axios.post(`${host}/api/generate`, payload, {
+    timeout: 30000,  // 30 secondi timeout
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  });
+
+  const content = res.data?.response || '[risposta vuota da Ollama]';
+  logger.debug(`Risposta Ollama ricevuta: ${content.substring(0, 100)}...`);
+  
+  return { 
+    content: content.trim(), 
+    model: payload.model 
+  };
+}
+
+async function callClaude(promptText, settings) {
+  if (!_config.services.claude.apiKey) {
+    throw new Error('Claude API key non configurata');
+  }
+
+  const payload = {
+    model: _config.services.claude.defaultModel,
+    max_tokens: settings.maxTokens,
+    temperature: settings.temperature,
+    messages: [
+      { role: 'user', content: promptText }
+    ]
+  };
+
+  logger.debug('Chiamata Claude API');
+  
+  const res = await axios.post(
+    'https://api.anthropic.com/v1/messages',
+    payload,
+    {
+      timeout: 30000,
+      headers: {
+        'x-api-key': _config.services.claude.apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json'
+      }
+    }
+  );
+
+  const content = res.data?.content?.[0]?.text || '[risposta vuota da Claude]';
+  logger.debug(`Risposta Claude ricevuta: ${content.substring(0, 100)}...`);
+  
+  return { 
+    content: content.trim(), 
+    model: _config.services.claude.defaultModel 
+  };
+}
+
+async function getAvailableModels() {
+  const models = [];
+  
+  if (_config.services.ollama.enabled) {
+    models.push({
+      id: 'llama3.1:8b',
+      name: 'Llama 3.1 8B (Ollama)',
+      provider: 'ollama',
+      capabilities: ['complete'],
+      isDefault: _config.defaultProvider === 'ollama'
+    });
+  }
+  
+  if (_config.services.claude.enabled) {
+    models.push({
+      id: 'claude',
+      name: 'Claude (Anthropic)',
+      provider: 'anthropic',
+      capabilities: ['complete'],
+      isDefault: _config.defaultProvider === 'claude'
+    });
+  }
+  
+  return models;
+}
+
+async function getStatus() {
+  return {
+    active: _active,
+    provider: _config.defaultProvider,
+    defaultModel: _config.defaultModel,
+    services: {
+      ollama: {
+        enabled: _config.services.ollama.enabled,
+        host: _config.services.ollama.host
+      },
+      claude: {
+        enabled: _config.services.claude.enabled,
+        configured: !!_config.services.claude.apiKey
+      }
+    }
+  };
+}
+
+module.exports = {
+  initialize,
+  shutdown,
+  isActive,
+  complete,
+  getAvailableModels,
+  getStatus
+};
