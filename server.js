@@ -119,8 +119,9 @@ class LuluServer {
 
   startServer() {
     return new Promise((resolve, reject) => {
-      this.server.listen(PORT, '127.0.0.1', () => {
-        logger.info(`Server in ascolto su http://127.0.0.1:${PORT}`);
+      // ✅ Corretto: ora ascolta su 0.0.0.0
+      this.server.listen(PORT, '0.0.0.0', () => {
+        logger.info(`Server in ascolto su http://0.0.0.0:${PORT}`);
         resolve();
       });
       this.server.on('error', err => {
