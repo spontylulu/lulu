@@ -31,7 +31,7 @@ class LuluServer {
       this.app.use(cors());
       logger.debug('CORS abilitato per sviluppo');
     }
-    this.app.use(express.static(path.join(__dirname, 'public')));
+    this.app.use(express.static(path.join(__dirname, 'ui'))); // Serve l'interfaccia Flutter Web
     this.app.use((req, res, next) => {
       logger.debug(`${req.method} ${req.url}`);
       next();
@@ -110,16 +110,15 @@ class LuluServer {
     });
 
     // =============================
-    // UI: fallback su interfaccia
+    // UI: fallback su Flutter Web
     // =============================
     this.app.get('*', (req, res) => {
-      res.sendFile(path.join(__dirname, 'public', 'index.html'));
+      res.sendFile(path.join(__dirname, 'ui', 'index.html'));
     });
   }
 
   startServer() {
     return new Promise((resolve, reject) => {
-      // ✅ Corretto: ora ascolta su 0.0.0.0
       this.server.listen(PORT, '0.0.0.0', () => {
         logger.info(`Server in ascolto su http://0.0.0.0:${PORT}`);
         resolve();
@@ -164,6 +163,7 @@ class LuluServer {
     logger.error('Avvio server interrotto per errore caricamento moduli');
   }
 })();
+
 // =======================
 // AUTO-PING PER RENDER (evita sleep)
 // =======================
