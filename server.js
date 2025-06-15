@@ -164,3 +164,25 @@ class LuluServer {
     logger.error('Avvio server interrotto per errore caricamento moduli');
   }
 })();
+// =======================
+// AUTO-PING PER RENDER (evita sleep)
+// =======================
+
+const https = require('https');
+
+function autoPing() {
+  const renderURL = 'https://lulu-server.onrender.com/';
+
+  setInterval(() => {
+    console.log(`[KEEPALIVE] Ping automatico a ${renderURL} – ${new Date().toISOString()}`);
+
+    https.get(renderURL, (res) => {
+      console.log(`[KEEPALIVE] Risposta ping: ${res.statusCode}`);
+    }).on('error', (err) => {
+      console.error(`[KEEPALIVE] Errore ping: ${err.message}`);
+    });
+
+  }, 840000); // ogni 14 minuti (Render timeout = 15m)
+}
+
+autoPing();
